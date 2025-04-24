@@ -1,0 +1,248 @@
+service: reto-tecnico-backend-node-indra-2025
+
+stages:
+  default:
+    params:
+      appointmentTableName: appointment-table-${sls:stage}
+      completedBusName: completed-bus-${sls:stage}
+      completedBusSource: com.appointment.${sls:stage}
+      completedBusDetailType: appointment-type-${sls:stage}
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+          Resource:
+            - Fn::GetAtt: [AppointmentTable, Arn]
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            - Ref: PendingTopic
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+          Resource:
+            - Fn::GetAtt: [PendingQueuePE, Arn]
+            - Fn::GetAtt: [PendingQueueCL, Arn]
+            - Fn::GetAtt: [CompletedQueue, Arn]
+        - Effect: Allow
+          Action:
+            - events:PutEvents
+          Resource:
+            Fn::GetAtt: [CompletedEventBus, Arn]
+
+functions:
+  appointment:
+    handler: src/handlers/appointment.handler
+    environment:
+      APPOINTMENT_TABLE_NAME: ${param:appointmentTableName}
+      PENDING_TOPIC_ARN: {Ref: PendingTopic}
+    events:
+      - httpApi:
+          method: post
+          path: /appointments
+      - httpApi:
+          method: get
+          path: /appointments/{insuredId}
+      - sqs:
+          arn:
+            Fn::GetAtt: [CompletedQueue, Arn]
+  appointment_pe:
+    handler: src/handlers/appointment_pe.handler
+    environment:
+      COMPLETED_BUS_NAME: ${param:completedBusName}
+      COMPLETED_BUS_SOURCE: ${param:completedBusSource}
+      COMPLETED_BUS_DETAIL_TYPE: ${param:completedBusDetailType}
+      DATABASE_URL: ${env:RDS_URL_PE}
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [PendingQueuePE, Arn]
+  appointment_cl:
+    handler: src/handlers/appointment_cl.handler
+    environment:
+      COMPLETED_BUS_NAME: ${param:completedBusName}
+      COMPLETED_BUS_SOURCE: ${param:completedBusSource}
+      COMPLETED_BUS_DETAIL_TYPE: ${param:completedBusDetailType}
+      DATABASE_URL: ${env:RDS_URL_CL}
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [PendingQueueCL, Arn]
+
+resources:
+  Resources:
+    # DynamoDB
+    AppointmentTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${param:appointmentTableName}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: insuredId
+            AttributeType: S
+          - AttributeName: scheduleId
+            AttributeType: N
+        KeySchema:
+          - AttributeName: insuredId
+            KeyType: HASH
+          - AttributeName: scheduleId
+            KeyType: RANGE
+    # SNS
+    PendingTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: pending-topic-${sls:stage}
+    PendingSubscriptionPE:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        RawMessageDelivery: true
+        Endpoint:
+          Fn::GetAtt: [PendingQueuePE, Arn]
+        TopicArn:
+          Ref: PendingTopic
+        FilterPolicyScope: MessageBody
+        FilterPolicy:
+          countryISO: [PE]
+    PendingSubscriptionCL:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        RawMessageDelivery: true
+        Endpoint:
+          Fn::GetAtt: [PendingQueueCL, Arn]
+        TopicArn:
+          Ref: PendingTopic
+        FilterPolicyScope: MessageBody
+        FilterPolicy:
+          countryISO: [CL]
+    # SQS
+    PendingQueuePE:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: pending-queue-pe-${sls:stage}
+    PendingQueuePEPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - Ref: PendingQueuePE
+        PolicyDocument:
+          # eslint-disable-next-line yaml/plain-scalar
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: sns.amazonaws.com
+              Action: sqs:SendMessage
+              Resource:
+                Fn::GetAtt: [PendingQueuePE, Arn]
+              Condition:
+                ArnEquals:
+                  aws:SourceArn:
+                    Ref: PendingTopic
+    PendingQueueCL:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: pending-queue-cl-${sls:stage}
+    PendingQueueCLPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - Ref: PendingQueueCL
+        PolicyDocument:
+          # eslint-disable-next-line yaml/plain-scalar
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: sns.amazonaws.com
+              Action: sqs:SendMessage
+              Resource:
+                Fn::GetAtt: [PendingQueueCL, Arn]
+              Condition:
+                ArnEquals:
+                  aws:SourceArn:
+                    Ref: PendingTopic
+    CompletedQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: completed-queue-${sls:stage}
+    CompletedQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - Ref: CompletedQueue
+        PolicyDocument:
+          # eslint-disable-next-line yaml/plain-scalar
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: events.amazonaws.com
+              Action: sqs:SendMessage
+              Resource:
+                Fn::GetAtt: [CompletedQueue, Arn]
+              Condition:
+                ArnEquals:
+                  aws:SourceArn:
+                    Ref: CompletedEventRule
+    # EventBridge
+    CompletedEventBus:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: ${param:completedBusName}
+    CompletedEventRule:
+      Type: AWS::Events::Rule
+      Properties:
+        EventBusName:
+          Ref: CompletedEventBus
+        EventPattern:
+          source:
+            - ${param:completedBusSource}
+          detail-type:
+            - ${param:completedBusDetailType}
+        Targets:
+          - Id: CompletedQueueTarget
+            Arn:
+              Fn::GetAtt: [CompletedQueue, Arn]
+            RoleArn:
+              Fn::GetAtt: [CompletedEventRuleRole, Arn]
+    # IAM
+    CompletedEventRuleRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          # eslint-disable-next-line yaml/plain-scalar
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: events.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: CompletedEventRulePolicy
+            PolicyDocument:
+              # eslint-disable-next-line yaml/plain-scalar
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - sqs:SendMessage
+                  Resource:
+                    Fn::GetAtt: [CompletedQueue, Arn]
+
+build:
+  esbuild:
+    external:
+      - mysql2

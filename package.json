@@ -1,0 +1,38 @@
+{
+	"name": "reto-tecnico-backend-node-indra-2025",
+	"type": "module",
+	"version": "1.0.0",
+	"description": "Implementación de reto técnico para el cargo de desarrollador backend en Indra.",
+	"author": "Bryan Horna <bryanjhv@gmail.com> (https://bryanjhv.com)",
+	"license": "MIT",
+	"keywords": [
+		"appointments",
+		"aws",
+		"indra",
+		"lambda",
+		"nodejs",
+		"rimac",
+		"serverless"
+	],
+	"scripts": {
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix"
+	},
+	"dependencies": {
+		"@aws-sdk/client-dynamodb": "3.788.0",
+		"@aws-sdk/client-eventbridge": "3.790.0",
+		"@aws-sdk/client-sns": "3.787.0",
+		"@aws-sdk/lib-dynamodb": "3.789.0",
+		"mysql2": "3.14.0"
+	},
+	"devDependencies": {
+		"@antfu/eslint-config": "4.12.0",
+		"@tsconfig/node22": "22.0.1",
+		"@tsconfig/strictest": "2.0.5",
+		"@types/aws-lambda": "8.10.149",
+		"@types/node": "22.14.1",
+		"eslint": "9.25.1",
+		"eslint-plugin-format": "1.0.1",
+		"typescript": "5.8.3"
+	}
+}

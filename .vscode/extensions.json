@@ -1,0 +1,9 @@
+{
+	"recommendations": [
+		"dbaeumer.vscode-eslint",
+		"mkhl.direnv"
+	],
+	"unwantedRecommendations": [
+		"esbenp.prettier-vscode"
+	]
+}
